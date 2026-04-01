@@ -11,6 +11,8 @@ A type-safe, refactor-friendly Go API for defining goverter converter mappings â
 | Compiler checks     | No       | Yes |
 | IDE rename/refactor | No       | Yes |
 | Go to definition    | No       | Yes |
+| Inline docs (hover) | No       | Yes |
+| Autocomplete        | No       | Yes |
 | Readable diffs      | Yes      | Yes |
 
 ## Installation
