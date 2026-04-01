@@ -68,9 +68,11 @@ var _ = dsl.Conv[MyConverter](
     dsl.ExtendPassArgs(helperWithCtx),           // extend where all non-source params are passed through
     dsl.ExtendPkg(pkg.AnySymbol),               // extend all exported functions from a package
     dsl.ExtendPkg(pkg.AnySymbol, regexp.MustCompile("Convert.*")), // extend matching functions from a package
-    dsl.WrapErrors(true),                        // wrap errors with context
+    dsl.WrapErrors(true),                        // wrap errors with field path context
+    dsl.WrapErrorsUsing(werror.Wrap),            // wrap errors using custom package (must implement werror contract)
     dsl.IgnoreMissing(true),                     // ignore unmapped target fields
     dsl.MatchIgnoreCase(true),                   // match fields case-insensitively
+    dsl.OutputFormat(dsl.OutputFormatFunction),  // output format: struct (default), assign-variable, function
 )
 ```
 
@@ -107,14 +109,14 @@ dsl.MethodAutoPassArgs(Converter.Convert)
 ## Field mapping
 
 ```go
-m.Map(m.From.Nested.Field, m.To.Target)        // nested source field
-m.Map(dsl.Source, m.To.Target)                  // entire source object as field
-m.MapCustom(m.From.Field, m.To.Target, convert) // with custom converter function
-m.MapIdentity(m.To.Target, convert)             // identity mapping with converter
-m.AutoMap(m.From.Nested)                        // auto-map all fields from nested struct
-m.Ignore(m.To.Field1, m.To.Field2)             // ignore multiple fields
-m.Default(NewOutput)                            // default constructor for output
-m.Update("paramName")                           // update existing value via parameter
+m.Map(m.From.Nested.Field, m.To.Target)           // nested source field
+m.Map(dsl.Source, m.To.Target)                     // entire source object as field
+m.MapCustom(m.From.Field, m.To.Target, convert)    // with custom converter function
+m.Set(m.To.CreatedAt, time.Now)                    // set field via no-arg function (fn() FieldType)
+m.AutoMap(m.From.Nested)                           // auto-map all fields from nested struct
+m.Ignore(m.To.Field1, m.To.Field2)                // ignore multiple fields
+m.Default(NewOutput)                               // default constructor for output
+m.Update("paramName")                              // update existing value via parameter
 ```
 
 ## Enum mapping
