@@ -196,6 +196,52 @@ The migration tool:
 - Skips unrelated packages to avoid build errors in code that imports generated files
 - Warns about `goverter:variables` converters (not supported by DSL)
 
+## Comparison with convgen
+
+[convgen](https://github.com/sublee/convgen) is a similar tool with a comparable DSL-first approach. Here's how they differ:
+
+**Declaration style**
+
+```go
+// convgen — standalone function per conversion
+var ConvertUser = convgen.Struct[User, api.User](nil,
+    convgen.Match(User{}.Name, api.User{}.Username),
+)
+
+// goverter DSL — methods grouped under a converter interface
+var _ = dsl.Conv[UserConverter](
+    dsl.Method(UserConverter.Convert, func(m *dsl.Mapping[User, api.User]) {
+        m.Map(m.From.Name, m.To.Username)
+    }),
+)
+```
+
+**Feature comparison**
+
+|                              | convgen                         | goverter DSL                                  |
+| ---------------------------- | ------------------------------- | --------------------------------------------- |
+| Output                       | Functions                       | Struct with methods                           |
+| DI / interface mocking       | Manual                          | Built-in                                      |
+| Multiple conversions         | Separate vars                   | One `Conv[T]` block                           |
+| Union / interface types      | Yes                             | No                                            |
+| Error wrapping               | No                              | Yes                                           |
+| Drop-in for existing project | No                              | Yes — same engine, same generated code        |
+| Migration tool               | No                              | `goverter-migrate`                            |
+| Golangci-lint plugin         | Yes                             | No                                            |
+| Maturity                     | Early stage                     | Experimental fork — no stable release yet     |
+
+**When to choose goverter DSL**: you already use goverter, want maximum automation (pointers, slices, maps, nested paths handled automatically), or need a drop-in replacement for comment-based definitions — same generator, same output, no migration risk.
+
+**When to choose convgen**: you prefer a minimal explicit approach where complex conversions are always custom functions, need union/interface type conversions, or want golangci-lint integration.
+
+## TODO
+
+- [ ] Support variable-based converters (`goverter:variables`)
+- [ ] Split code into focused responsibility zones (parse / migrate / generate)
+- [ ] Write unit tests for DSL-specific logic
+- [ ] Refactor and reduce overall complexity
+- [ ] golangci-lint plugin
+
 ## Reference
 
 All available options mirror the comment-based API. See the [goverter settings reference](https://goverter.jmattheis.de/reference/settings) for full documentation of each option.
