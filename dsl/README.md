@@ -142,8 +142,8 @@ Install the migration tool and the patched goverter (uses a separate binary name
 git clone https://github.com/ciricc/goverter
 cd goverter
 
-# installs as "migrate" — does not conflict with your existing goverter binary
-go install ./cmd/migrate
+# installs as "goverter-migrate" — does not conflict with your existing goverter binary
+go install ./cmd/goverter-migrate
 
 # installs patched goverter as "goverter-dsl" 
 GOBIN=$(go env GOPATH)/bin go build -o $(go env GOPATH)/bin/goverter-dsl ./cmd/goverter
@@ -153,10 +153,10 @@ Run migration:
 
 ```bash
 # Preview changes without writing files
-migrate -dry-run ./...
+goverter-migrate -dry-run ./...
 
 # Apply migration
-migrate ./...
+goverter-migrate ./...
 ```
 
 Then use `goverter-dsl` instead of `goverter` to generate converters:
