@@ -248,11 +248,7 @@ func parseOption(pkg *packages.Package, conv *config.RawConverter, expr ast.Expr
 	if name == "Method" || name == "MethodPassArgs" {
 		return parseMethodOption(pkg, conv, call, name == "MethodPassArgs")
 	}
-	if name == "MethodAuto" || name == "MethodAutoPassArgs" {
-		return parseMethodAutoOption(pkg, conv, call, name == "MethodAutoPassArgs")
-	}
-
-	if name == "ExtendPassArgs" {
+if name == "ExtendPassArgs" {
 		return parseExtendWithContext(pkg, conv, call, false)
 	}
 	if name == "ExtendAllContext" {

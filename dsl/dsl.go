@@ -386,17 +386,6 @@ func Method[From, To any](method any, configure func(m *Mapping[From, To])) Opti
 	return Option{}
 }
 
-// MethodAuto registers a method with no additional mapping configuration.
-// Equivalent to Method with an empty configure function, but without requiring
-// explicit type parameters.
-//
-//	dsl.MethodAuto(MyConverter.Convert)
-func MethodAuto(method any) Option { return Option{} }
-
-// MethodAutoPassArgs is like [MethodAuto] but for methods with extra pass-through arguments.
-//
-//	dsl.MethodAutoPassArgs(MyConverter.Convert)
-func MethodAutoPassArgs(method any) Option { return Option{} }
 
 // MethodPassArgs configures mapping for a method that has extra arguments
 // beyond the source. All parameters except the first (source), update target,
