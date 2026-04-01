@@ -248,7 +248,7 @@ var _ = dsl.Conv[UserConverter](
 - [ ] Split code into focused responsibility zones (parse / migrate / generate)
 - [ ] Write unit tests for DSL-specific logic
 - [ ] Refactor and reduce overall complexity
-- [ ] golangci-lint plugin
+- [ ] golangci-lint plugin / `go vet` analyzer (`cmd/dslcheck`) for IDE inline diagnostics — wraps dslparse logic into `golang.org/x/tools/go/analysis` so errors like swapped source/target are highlighted in-editor via gopls
 - [ ] `MethodUpdate` — convention-based update method where the second parameter is always the target, eliminating the string argument in `m.Update("paramName")`
 
 ## Reference

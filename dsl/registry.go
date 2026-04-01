@@ -109,11 +109,13 @@ func ConverterOptByComment() map[string]OptDef {
 type MethodArgKind int
 
 const (
-	AField MethodArgKind = iota // struct field path: m.From.X → "X"
-	AFunc                       // function reference: strconv.Itoa → "strconv:Itoa"
-	AStr                        // string literal: "db" → "db"
-	ABool                       // bool literal: true → "yes", false → "no"
-	ADot                        // literal "." — entire source object sentinel
+	AField     MethodArgKind = iota // struct field path (source or target, unchecked)
+	AFunc                           // function reference: strconv.Itoa → "strconv:Itoa"
+	AStr                            // string literal: "db" → "db"
+	ABool                           // bool literal: true → "yes", false → "no"
+	ADot                            // literal "." — entire source object sentinel
+	AFieldFrom                      // struct field path that must start with m.From
+	AFieldTo                        // struct field path that must start with m.To
 )
 
 // MethodDef describes how a Mapping method call translates to a goverter: line.
@@ -127,11 +129,11 @@ type MethodDef struct {
 // MethodDefs maps DSL method names on Mapping to their goverter: line definitions.
 // Keys must match actual method names on [Mapping] — validated by registry_test.go.
 var MethodDefs = map[string]MethodDef{
-	"Map":       {Comment: "map", Args: []MethodArgKind{AField, AField}},
-	"MapCustom": {Comment: "map", Args: []MethodArgKind{AField, AField, AFunc}, PipeLast: true},
-	"Set":       {Comment: "map", Args: []MethodArgKind{ADot, AField, AFunc}, PipeLast: true},
-	"Ignore":    {Comment: "ignore", Args: []MethodArgKind{AField}, Variadic: true},
-	"AutoMap":   {Comment: "autoMap", Args: []MethodArgKind{AField}},
+	"Map":       {Comment: "map", Args: []MethodArgKind{AFieldFrom, AFieldTo}},
+	"MapCustom": {Comment: "map", Args: []MethodArgKind{AFieldFrom, AFieldTo, AFunc}, PipeLast: true},
+	"Set":       {Comment: "map", Args: []MethodArgKind{ADot, AFieldTo, AFunc}, PipeLast: true},
+	"Ignore":    {Comment: "ignore", Args: []MethodArgKind{AFieldTo}, Variadic: true},
+	"AutoMap":   {Comment: "autoMap", Args: []MethodArgKind{AFieldFrom}},
 	"Default":   {Comment: "default", Args: []MethodArgKind{AFunc}},
 	"Update":    {Comment: "update", Args: []MethodArgKind{AStr}},
 	"EnumMap":   {Comment: "enum:map", Args: []MethodArgKind{AStr, AStr}},

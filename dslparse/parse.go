@@ -573,7 +573,11 @@ func parseMappingCall(pkg *packages.Package, call *ast.CallExpr) (string, error)
 		if def.Variadic && defIdx == len(def.Args)-1 {
 			// variadic: consume remaining call args with last kind
 			for ; callArgIdx < len(call.Args); callArgIdx++ {
-				parts = append(parts, extractArg(pkg, call, callArgIdx, kind))
+				val, err := extractArg(pkg, call, callArgIdx, kind)
+				if err != nil {
+					return "", err
+				}
+				parts = append(parts, val)
 			}
 			break
 		}
@@ -581,7 +585,11 @@ func parseMappingCall(pkg *packages.Package, call *ast.CallExpr) (string, error)
 			parts = append(parts, ".")
 			continue
 		}
-		parts = append(parts, extractArg(pkg, call, callArgIdx, kind))
+		val, err := extractArg(pkg, call, callArgIdx, kind)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, val)
 		callArgIdx++
 	}
 
@@ -594,20 +602,32 @@ func parseMappingCall(pkg *packages.Package, call *ast.CallExpr) (string, error)
 	return def.Comment + " " + strings.Join(parts, " "), nil
 }
 
-func extractArg(pkg *packages.Package, call *ast.CallExpr, i int, kind dsl.MethodArgKind) string {
+func extractArg(pkg *packages.Package, call *ast.CallExpr, i int, kind dsl.MethodArgKind) (string, error) {
 	switch kind {
 	case dsl.AField:
-		return extractFieldPath(pkg, call.Args[i])
+		return extractFieldPath(pkg, call.Args[i]), nil
+	case dsl.AFieldFrom:
+		path, prefix := extractFieldPathWithPrefix(pkg, call.Args[i])
+		if prefix != "" && prefix != "From" {
+			return "", fmt.Errorf("argument %d must reference m.From (got m.%s) — did you swap source and target?", i+1, prefix)
+		}
+		return path, nil
+	case dsl.AFieldTo:
+		path, prefix := extractFieldPathWithPrefix(pkg, call.Args[i])
+		if prefix != "" && prefix != "To" {
+			return "", fmt.Errorf("argument %d must reference m.To (got m.%s) — did you swap source and target?", i+1, prefix)
+		}
+		return path, nil
 	case dsl.AFunc:
-		return extractFuncRef(pkg, call.Args[i])
+		return extractFuncRef(pkg, call.Args[i]), nil
 	case dsl.AStr:
-		return extractString(call, i)
+		return extractString(call, i), nil
 	case dsl.ABool:
-		return extractBoolAsYesNo(call, i)
+		return extractBoolAsYesNo(call, i), nil
 	case dsl.ADot:
-		return "."
+		return ".", nil
 	}
-	return ""
+	return "", nil
 }
 
 // isSourceSentinel checks if expr refers to dsl.Source (via dot-import or qualified).
@@ -662,6 +682,31 @@ func extractMethodName(expr ast.Expr) (string, error) {
 
 // extractFieldPath resolves m.From.X.Y or m.To.X into a field path string.
 // Returns "." for dsl.Source sentinel.
+// extractFieldPathWithPrefix returns the field path and the Mapping accessor prefix
+// ("From" or "To"). Returns empty prefix for dsl.Source sentinel or unknown expressions.
+func extractFieldPathWithPrefix(pkg *packages.Package, expr ast.Expr) (path, prefix string) {
+	if isSourceSentinel(pkg, expr) {
+		return ".", ""
+	}
+	var parts []string
+	e := expr
+	for {
+		sel, ok := e.(*ast.SelectorExpr)
+		if !ok {
+			break
+		}
+		parts = append([]string{sel.Sel.Name}, parts...)
+		e = sel.X
+	}
+	if len(parts) >= 2 {
+		return strings.Join(parts[1:], "."), parts[0]
+	}
+	if len(parts) == 1 {
+		return parts[0], ""
+	}
+	return ".", ""
+}
+
 func extractFieldPath(pkg *packages.Package, expr ast.Expr) string {
 	// Check for nil
 	if ident, ok := expr.(*ast.Ident); ok && ident.Name == "nil" {
