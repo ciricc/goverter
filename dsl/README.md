@@ -6,12 +6,12 @@ A type-safe, refactor-friendly Go API for defining goverter converter mappings �
 
 ## Why DSL?
 
-| | Comments | DSL |
-|---|---|---|
-| Compiler checks | No | Yes |
-| IDE rename/refactor | No | Yes |
-| Go to definition | No | Yes |
-| Readable diffs | Yes | Yes |
+|                     | Comments | DSL |
+| ------------------- | -------- | --- |
+| Compiler checks     | No       | Yes |
+| IDE rename/refactor | No       | Yes |
+| Go to definition    | No       | Yes |
+| Readable diffs      | Yes      | Yes |
 
 ## Installation
 
@@ -136,17 +136,40 @@ dsl.Conv[MyConverter](
 
 ## Migrating from comments
 
-Install the migration tool and the patched goverter (uses a separate binary name to avoid overwriting your existing `goverter`):
+Since this fork keeps the original module path (`github.com/jmattheis/goverter`), add a `replace` directive to your `go.mod`.
+
+Get the latest pseudo-version:
+
+```bash
+go list -m github.com/ciricc/goverter@main
+```
+
+Then add to `go.mod`:
+
+```
+replace github.com/jmattheis/goverter => github.com/ciricc/goverter <version>
+```
+
+Or in one command:
+
+```bash
+GOPROXY=direct go mod edit -replace github.com/jmattheis/goverter=github.com/ciricc/goverter@<version>
+go mod tidy
+```
+
+---
+
+Clone the fork and install the tools:
 
 ```bash
 git clone https://github.com/ciricc/goverter
 cd goverter
 
-# installs as "goverter-migrate" — does not conflict with your existing goverter binary
+# goverter-migrate — migration tool (won't overwrite your existing goverter)
 go install ./cmd/goverter-migrate
 
-# installs patched goverter as "goverter-dsl" 
-GOBIN=$(go env GOPATH)/bin go build -o $(go env GOPATH)/bin/goverter-dsl ./cmd/goverter
+# goverter-dsl — patched goverter that understands DSL
+go build -o $(go env GOPATH)/bin/goverter-dsl ./cmd/goverter
 ```
 
 Run migration:
@@ -159,7 +182,9 @@ goverter-migrate -dry-run ./...
 goverter-migrate ./...
 ```
 
-Then use `goverter-dsl` instead of `goverter` to generate converters:
+The tool automatically finds all packages containing `goverter:converter` comments — no need to specify them manually, `./...` works even in large projects with generated code.
+
+Then use `goverter-dsl` instead of `goverter` to generate converters from DSL:
 
 ```bash
 goverter-dsl gen ./...
@@ -168,6 +193,7 @@ goverter-dsl gen ./...
 The migration tool:
 - Generates `goverter_dsl.go` next to each converter package
 - Removes `// goverter:` comments from original files
+- Skips unrelated packages to avoid build errors in code that imports generated files
 - Warns about `goverter:variables` converters (not supported by DSL)
 
 ## Reference

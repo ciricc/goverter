@@ -18,7 +18,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,14 +37,30 @@ func main() {
 	}
 	flag.Parse()
 
-	patterns := flag.Args()
-	if len(patterns) == 0 {
-		patterns = []string{"./..."}
+	// Normalize patterns: strip trailing /... for filesystem walking
+	var roots []string
+	for _, p := range flag.Args() {
+		roots = append(roots, strings.TrimSuffix(p, "/..."))
+	}
+	if len(roots) == 0 {
+		roots = []string{"."}
 	}
 
 	workDir, err := os.Getwd()
 	if err != nil {
 		fatalf("could not get working directory: %v", err)
+	}
+
+	// Find only directories that contain goverter:converter comments.
+	// This avoids loading unrelated packages (e.g. those importing generated code
+	// with //go:build !goverter) which fail to compile under -tags goverter.
+	patterns, err := findConverterDirs(workDir, roots)
+	if err != nil {
+		fatalf("failed to scan for converters: %v", err)
+	}
+	if len(patterns) == 0 {
+		fmt.Fprintln(os.Stderr, "no goverter:converter definitions found")
+		os.Exit(0)
 	}
 
 	convs, err := comments.ParseDocs(comments.ParseDocsConfig{
@@ -88,8 +103,6 @@ func main() {
 		g.convs = append(g.convs, cc)
 	}
 
-	fset := token.NewFileSet()
-	_ = fset
 
 	for _, pkgPath := range order {
 		g := groups[pkgPath]
@@ -128,6 +141,56 @@ func main() {
 			fmt.Printf("stripped %s\n", path)
 		}
 	}
+}
+
+// findConverterDirs walks roots and returns import-path-style patterns for
+// directories that contain at least one "goverter:converter" comment.
+// This avoids passing unrelated packages to ParseDocs.
+func findConverterDirs(workDir string, roots []string) ([]string, error) {
+	seen := map[string]bool{}
+	var patterns []string
+
+	for _, root := range roots {
+		if !filepath.IsAbs(root) {
+			root = filepath.Join(workDir, filepath.Clean(strings.TrimPrefix(root, ".")))
+		}
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil // skip unreadable dirs
+			}
+			if d.IsDir() {
+				if d.Name() == "vendor" || strings.HasPrefix(d.Name(), ".") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			if !strings.Contains(string(data), "goverter:converter") {
+				return nil
+			}
+			dir := filepath.Dir(path)
+			if seen[dir] {
+				return nil
+			}
+			seen[dir] = true
+			rel, err := filepath.Rel(workDir, dir)
+			if err != nil {
+				return nil
+			}
+			patterns = append(patterns, "./"+filepath.ToSlash(rel))
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return patterns, nil
 }
 
 // stripPackageComments removes // goverter: lines from all .go files in dir.
