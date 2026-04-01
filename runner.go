@@ -6,6 +6,7 @@ import (
 
 	"github.com/jmattheis/goverter/comments"
 	"github.com/jmattheis/goverter/config"
+	"github.com/jmattheis/goverter/dslparse"
 	"github.com/jmattheis/goverter/enum"
 	"github.com/jmattheis/goverter/generator"
 )
@@ -37,6 +38,7 @@ func GenerateConverters(c *GenerateConfig) error {
 }
 
 func generateConvertersRaw(c *GenerateConfig) (map[string][]byte, error) {
+	// Comment-based converters (goverter:converter in comments)
 	rawConverters, err := comments.ParseDocs(comments.ParseDocsConfig{
 		BuildTags:      c.BuildTags,
 		PackagePattern: c.PackagePatterns,
@@ -45,6 +47,17 @@ func generateConvertersRaw(c *GenerateConfig) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// DSL-based converters (dsl.Conv[T](...) calls)
+	dslConverters, err := dslparse.ParseDSL(dslparse.Config{
+		BuildTags:      c.BuildTags,
+		PackagePattern: c.PackagePatterns,
+		WorkingDir:     c.WorkingDir,
+	})
+	if err != nil {
+		return nil, err
+	}
+	rawConverters = append(rawConverters, dslConverters...)
 
 	converters, err := config.Parse(&config.Raw{
 		BuildTags:  c.BuildTags,
