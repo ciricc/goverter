@@ -249,6 +249,7 @@ var _ = dsl.Conv[UserConverter](
 - [ ] Write unit tests for DSL-specific logic
 - [ ] Refactor and reduce overall complexity
 - [ ] golangci-lint plugin
+- [ ] `MethodUpdate` — convention-based update method where the second parameter is always the target, eliminating the string argument in `m.Update("paramName")`
 
 ## Reference
 
