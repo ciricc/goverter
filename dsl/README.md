@@ -90,9 +90,7 @@ dsl.Method(Converter.Convert, func(m *dsl.Mapping[Input, Output]) {
 
 ### No configuration needed
 
-```go
-dsl.MethodAuto(Converter.ConvertItem)
-```
+Methods without any mapping configuration don't need to be listed in `Conv[T](...)` — goverter handles them automatically.
 
 ### Methods with extra pass-through arguments
 
@@ -101,9 +99,6 @@ dsl.MethodAuto(Converter.ConvertItem)
 dsl.MethodPassArgs(Converter.Convert, func(m *dsl.Mapping[Input, Output]) {
     m.Map(m.From.Name, m.To.FullName)
 })
-
-// No configuration:
-dsl.MethodAutoPassArgs(Converter.Convert)
 ```
 
 ## Field mapping
