@@ -204,7 +204,7 @@ func parseOption(pkg *packages.Package, conv *config.RawConverter, expr ast.Expr
 	if opt, ok := convOptsByDSL[name]; ok {
 		switch opt.Arg {
 		case dsl.ArgStr:
-			conv.Converter.Lines = append(conv.Converter.Lines, opt.Comment+" "+extractString(call, 0))
+			conv.Converter.Lines = append(conv.Converter.Lines, opt.Comment+" "+extractStringOrConst(pkg, call, 0))
 		case dsl.ArgBool:
 			conv.Converter.Lines = append(conv.Converter.Lines, opt.Comment+" "+extractBoolAsYesNo(call, 0))
 		case dsl.ArgFunc:
@@ -260,6 +260,9 @@ func parseOption(pkg *packages.Package, conv *config.RawConverter, expr ast.Expr
 	}
 	if name == "ExtendPkg" {
 		return parseExtendPkg(pkg, conv, call)
+	}
+	if name == "WrapErrorsUsing" {
+		return parseWrapErrorsUsing(pkg, conv, call)
 	}
 
 	return nil
@@ -328,6 +331,20 @@ func parseExtendWithContext(pkg *packages.Package, conv *config.RawConverter, ca
 		}
 		conv.Converter.Lines = append(conv.Converter.Lines, "extend "+strings.Join(funcNames, " "))
 	}
+	return nil
+}
+
+// parseWrapErrorsUsing handles WrapErrorsUsing(pkg.Wrap) calls.
+// Resolves the package path from the argument and emits "wrapErrorsUsing pkg/path".
+func parseWrapErrorsUsing(pkg *packages.Package, conv *config.RawConverter, call *ast.CallExpr) error {
+	if len(call.Args) == 0 {
+		return nil
+	}
+	obj := resolveFuncObj(pkg.TypesInfo, call.Args[0])
+	if obj == nil || obj.Pkg() == nil {
+		return fmt.Errorf("WrapErrorsUsing: could not resolve package from argument")
+	}
+	conv.Converter.Lines = append(conv.Converter.Lines, "wrapErrorsUsing "+obj.Pkg().Path())
 	return nil
 }
 
@@ -541,21 +558,35 @@ func parseMappingCall(pkg *packages.Package, call *ast.CallExpr) (string, error)
 		return "", nil
 	}
 
-	// Validate argument count.
-	expectedArgs := len(def.Args)
+	// Count how many ADot (literal) args there are — they don't consume call.Args.
+	dotCount := 0
+	for _, k := range def.Args {
+		if k == dsl.ADot {
+			dotCount++
+		}
+	}
+	expectedArgs := len(def.Args) - dotCount
 	if !def.Variadic && len(call.Args) != expectedArgs {
 		return "", fmt.Errorf("%s requires %d arguments, got %d", name, expectedArgs, len(call.Args))
 	}
 
-	// Extract each argument.
+	// Extract each argument, skipping ADot entries (they emit "." without consuming a call arg).
 	var parts []string
-	for i := range call.Args {
-		kind := def.Args[len(def.Args)-1] // use last kind for variadic overflow
-		if i < len(def.Args) {
-			kind = def.Args[i]
+	callArgIdx := 0
+	for defIdx, kind := range def.Args {
+		if def.Variadic && defIdx == len(def.Args)-1 {
+			// variadic: consume remaining call args with last kind
+			for ; callArgIdx < len(call.Args); callArgIdx++ {
+				parts = append(parts, extractArg(pkg, call, callArgIdx, kind))
+			}
+			break
 		}
-		val := extractArg(pkg, call, i, kind)
-		parts = append(parts, val)
+		if kind == dsl.ADot {
+			parts = append(parts, ".")
+			continue
+		}
+		parts = append(parts, extractArg(pkg, call, callArgIdx, kind))
+		callArgIdx++
 	}
 
 	// Build the goverter: line.
@@ -577,6 +608,8 @@ func extractArg(pkg *packages.Package, call *ast.CallExpr, i int, kind dsl.Metho
 		return extractString(call, i)
 	case dsl.ABool:
 		return extractBoolAsYesNo(call, i)
+	case dsl.ADot:
+		return "."
 	}
 	return ""
 }
@@ -789,6 +822,24 @@ func extractBoolAsYesNo(call *ast.CallExpr, i int) string {
 }
 
 // extractString gets a string literal from argument at index i.
+// extractStringOrConst extracts a string argument that may be either a string
+// literal or a typed string constant (e.g. dsl.OutputFormatFunction).
+func extractStringOrConst(pkg *packages.Package, call *ast.CallExpr, i int) string {
+	if i >= len(call.Args) {
+		return ""
+	}
+	// Try to resolve as a constant value via type info
+	if tv, ok := pkg.TypesInfo.Types[call.Args[i]]; ok && tv.Value != nil {
+		s := tv.Value.String()
+		// constant string values are quoted — strip quotes
+		if len(s) >= 2 && s[0] == '"' {
+			return s[1 : len(s)-1]
+		}
+		return s
+	}
+	return extractString(call, i)
+}
+
 func extractString(call *ast.CallExpr, i int) string {
 	if i >= len(call.Args) {
 		return ""

@@ -53,7 +53,6 @@ var ConverterOpts = []OptDef{
 	{"Name", "name", ArgStr},
 	{"StructComment", "struct:comment", ArgStr},
 	{"Extend", "extend", ArgFunc},
-	{"WrapErrorsUsing", "wrapErrorsUsing", ArgStr},
 	{"Enum", "enum", ArgBool},
 }
 
@@ -114,6 +113,7 @@ const (
 	AFunc                       // function reference: strconv.Itoa → "strconv:Itoa"
 	AStr                        // string literal: "db" → "db"
 	ABool                       // bool literal: true → "yes", false → "no"
+	ADot                        // literal "." — entire source object sentinel
 )
 
 // MethodDef describes how a Mapping method call translates to a goverter: line.
@@ -127,13 +127,13 @@ type MethodDef struct {
 // MethodDefs maps DSL method names on Mapping to their goverter: line definitions.
 // Keys must match actual method names on [Mapping] — validated by registry_test.go.
 var MethodDefs = map[string]MethodDef{
-	"Map":           {Comment: "map", Args: []MethodArgKind{AField, AField}},
-	"MapCustom":     {Comment: "map", Args: []MethodArgKind{AField, AField, AFunc}, PipeLast: true},
-	"MapIdentity":   {Comment: "map", Args: []MethodArgKind{AField, AFunc}, PipeLast: true},
-	"Ignore":        {Comment: "ignore", Args: []MethodArgKind{AField}, Variadic: true},
-	"AutoMap":       {Comment: "autoMap", Args: []MethodArgKind{AField}},
-	"Default":       {Comment: "default", Args: []MethodArgKind{AFunc}},
-	"Update":        {Comment: "update", Args: []MethodArgKind{AStr}},
-	"EnumMap": {Comment: "enum:map", Args: []MethodArgKind{AStr, AStr}},
-	"Enum":    {Comment: "enum", Args: []MethodArgKind{ABool}},
+	"Map":       {Comment: "map", Args: []MethodArgKind{AField, AField}},
+	"MapCustom": {Comment: "map", Args: []MethodArgKind{AField, AField, AFunc}, PipeLast: true},
+	"Set":       {Comment: "map", Args: []MethodArgKind{ADot, AField, AFunc}, PipeLast: true},
+	"Ignore":    {Comment: "ignore", Args: []MethodArgKind{AField}, Variadic: true},
+	"AutoMap":   {Comment: "autoMap", Args: []MethodArgKind{AField}},
+	"Default":   {Comment: "default", Args: []MethodArgKind{AFunc}},
+	"Update":    {Comment: "update", Args: []MethodArgKind{AStr}},
+	"EnumMap":   {Comment: "enum:map", Args: []MethodArgKind{AStr, AStr}},
+	"Enum":      {Comment: "enum", Args: []MethodArgKind{ABool}},
 }

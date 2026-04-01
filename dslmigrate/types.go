@@ -597,6 +597,11 @@ func (ctx *migrateCtx) converterLineToJen(line string, passArgs bool) jen.Code {
 		)
 	}
 
+	if cmd == "wrapErrorsUsing" {
+		// rest is a package path — reference the Wrap function from that package
+		return jen.Qual(dslPkg, "WrapErrorsUsing").Call(jen.Qual(rest, "Wrap"))
+	}
+
 	if opt, ok := dsl.ConverterOptByComment()[cmd]; ok {
 		switch opt.Arg {
 		case dsl.ArgStr:
@@ -751,7 +756,7 @@ func (ctx *migrateCtx) mapLineToJen(rest string, info MethodInfo) jen.Code {
 		convExprs := ctx.funcRefsToJen(converter, info.Target, info.TargetPkg)
 		convExpr := convExprs[0]
 		if source == "" {
-			return jen.Id("m").Dot("MapIdentity").Call(tgtExpr, convExpr)
+			return jen.Id("m").Dot("Set").Call(tgtExpr, convExpr)
 		}
 		return jen.Id("m").Dot("MapCustom").Call(srcExpr, tgtExpr, convExpr)
 	}
