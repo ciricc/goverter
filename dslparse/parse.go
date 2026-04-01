@@ -208,7 +208,10 @@ func parseOption(pkg *packages.Package, conv *config.RawConverter, expr ast.Expr
 		case dsl.ArgBool:
 			conv.Converter.Lines = append(conv.Converter.Lines, opt.Comment+" "+extractBoolAsYesNo(call, 0))
 		case dsl.ArgFunc:
-			names := extractFuncRefs(pkg, call)
+			names, err := extractFuncRefs(pkg, call)
+			if err != nil {
+				return err
+			}
 			if len(names) > 0 {
 				conv.Converter.Lines = append(conv.Converter.Lines, opt.Comment+" "+strings.Join(names, " "))
 			}
@@ -645,15 +648,20 @@ func extractFuncRef(pkg *packages.Package, expr ast.Expr) string {
 }
 
 // extractFuncRefs resolves all function reference arguments from a call.
-func extractFuncRefs(pkg *packages.Package, call *ast.CallExpr) []string {
+// Returns an error if any argument is not a function reference or string literal
+// (e.g. a lambda — not supported).
+func extractFuncRefs(pkg *packages.Package, call *ast.CallExpr) ([]string, error) {
 	var names []string
 	for _, arg := range call.Args {
+		if _, ok := arg.(*ast.FuncLit); ok {
+			return nil, fmt.Errorf("lambda functions are not supported as arguments — use a named function reference instead")
+		}
 		name := extractFuncRef(pkg, arg)
 		if name != "" {
 			names = append(names, name)
 		}
 	}
-	return names
+	return names, nil
 }
 
 // extractEnumAction resolves dsl.EnumPanic/EnumError/EnumIgnore to "@panic"/"@error"/"@ignore".

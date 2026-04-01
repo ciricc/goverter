@@ -28,10 +28,11 @@ type MethodInfo struct {
 
 // migrateCtx carries context through the migration call chain.
 type migrateCtx struct {
-	sourcePkg  string // converter's package path
-	workDir    string // workspace directory for package loading
-	pkgCache   map[string]*types.Package    // loaded packages cache
+	sourcePkg   string // converter's package path
+	workDir     string // workspace directory for package loading
+	pkgCache    map[string]*types.Package    // loaded packages cache
 	syntaxCache map[string]*packages.Package // loaded packages with syntax
+	pendingNote string // set when a string-ref fallback was used; flushed as a comment before the next top-level opt
 }
 
 func (ctx *migrateCtx) loadPkg(pkgPath string) *types.Package {
@@ -421,14 +422,26 @@ func ConvToJen(conv config.RawConverter, methods map[string]MethodInfo, workDir 
 	// Detect converter-level arg:context:regex → all methods use MethodPassArgs
 	forcePassArgs := ctx.converterHasContextRegex(conv.Converter.Lines)
 
-	var opts []jen.Code
+	type optWithNote struct {
+		note string
+		code jen.Code
+	}
+	var opts []optWithNote
 	for _, line := range conv.Converter.Lines {
+		ctx.pendingNote = ""
 		stmts := ctx.converterLineToJenMulti(line, forcePassArgs)
-		opts = append(opts, stmts...)
+		note := ctx.pendingNote
+		for i, s := range stmts {
+			n := ""
+			if i == 0 {
+				n = note
+			}
+			opts = append(opts, optWithNote{note: n, code: s})
+		}
 	}
 	for name, method := range conv.Methods {
 		info := methods[name]
-		opts = append(opts, ctx.methodToJen(conv.InterfaceName, name, forcePassArgs, info, method))
+		opts = append(opts, optWithNote{code: ctx.methodToJen(conv.InterfaceName, name, forcePassArgs, info, method)})
 	}
 
 	return jen.Var().Id("_").Op("=").Qual(dslPkg, "Conv").Types(jen.Id(conv.InterfaceName)).CustomFunc(jen.Options{
@@ -438,7 +451,10 @@ func ConvToJen(conv config.RawConverter, methods map[string]MethodInfo, workDir 
 		Multi:     true,
 	}, func(g *jen.Group) {
 		for _, opt := range opts {
-			g.Add(opt)
+			if opt.note != "" {
+				g.Comment(opt.note)
+			}
+			g.Add(opt.code)
 		}
 	})
 }
@@ -698,6 +714,11 @@ func (ctx *migrateCtx) funcRefsToJen(ref, targetFieldType, targetFieldPkg string
 		unexported := !token.IsExported(name)
 		cycle := ctx.wouldCycle(pkg)
 		if unexported || cycle {
+			reason := "unexported function: cannot reference across packages"
+			if cycle {
+				reason = "import cycle: " + pkg + " imports " + ctx.sourcePkg + "; refactor to break the cycle and use a Go reference instead"
+			}
+			ctx.pendingNote = "TODO: " + reason
 			return []jen.Code{jen.Lit(ref)}
 		}
 	}
