@@ -64,6 +64,8 @@ var _ = dsl.Conv[MyConverter](
     dsl.Name("CustomConverterImpl"),             // override generated struct name
     dsl.Extend(helperFunc, anotherHelper),       // register custom conversion functions
     dsl.ExtendPassArgs(helperWithCtx),           // extend where all non-source params are passed through
+    dsl.ExtendPkg(pkg.AnySymbol),               // extend all exported functions from a package
+    dsl.ExtendPkg(pkg.AnySymbol, regexp.MustCompile("Convert.*")), // extend matching functions from a package
     dsl.WrapErrors(true),                        // wrap errors with context
     dsl.IgnoreMissing(true),                     // ignore unmapped target fields
     dsl.MatchIgnoreCase(true),                   // match fields case-insensitively
@@ -178,8 +180,11 @@ Run migration:
 # Preview changes without writing files
 goverter-migrate -dry-run ./...
 
-# Apply migration
+# Apply migration (generates goverter_dsl.go next to each converter file)
 goverter-migrate ./...
+
+# Insert DSL inline into the source file, right after the converter interface
+goverter-migrate -inline ./...
 ```
 
 The tool automatically finds all packages containing `goverter:converter` comments — no need to specify them manually, `./...` works even in large projects with generated code.

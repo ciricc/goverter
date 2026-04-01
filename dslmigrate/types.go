@@ -441,7 +441,10 @@ func ConvToJen(conv config.RawConverter, methods map[string]MethodInfo, workDir 
 	}
 	for name, method := range conv.Methods {
 		info := methods[name]
-		opts = append(opts, optWithNote{code: ctx.methodToJen(conv.InterfaceName, name, forcePassArgs, info, method)})
+		code := ctx.methodToJen(conv.InterfaceName, name, forcePassArgs, info, method)
+		if code != nil {
+			opts = append(opts, optWithNote{code: code})
+		}
 	}
 
 	return jen.Var().Id("_").Op("=").Qual(dslPkg, "Conv").Types(jen.Id(conv.InterfaceName)).CustomFunc(jen.Options{
@@ -473,6 +476,30 @@ func RenderDSLFile(pkgName string, convs []jen.Code) string {
 		return "// render error: " + err.Error()
 	}
 	return buf.String()
+}
+
+// RenderDSLSnippet renders converter definitions as raw Go statements without
+// a package declaration or imports. Used for inline insertion into existing files.
+func RenderDSLSnippet(convs []jen.Code) string {
+	// Use a throw-away file just to render statements, then strip the header.
+	f := jen.NewFile("_")
+	for i, conv := range convs {
+		if i > 0 {
+			f.Line()
+		}
+		f.Add(conv)
+	}
+	buf := &strings.Builder{}
+	if err := f.Render(buf); err != nil {
+		return "// render error: " + err.Error()
+	}
+	// Strip everything up to and including the first blank line after "package _"
+	src := buf.String()
+	// Find the blank line that separates package decl / imports from body
+	if idx := strings.Index(src, "\n\n"); idx != -1 {
+		return strings.TrimLeft(src[idx:], "\n")
+	}
+	return src
 }
 
 func (ctx *migrateCtx) converterLineToJenMulti(line string, passArgs bool) []jen.Code {
@@ -558,11 +585,7 @@ func (ctx *migrateCtx) methodToJen(ifaceName, methodName string, forcePassArgs b
 	}
 
 	if len(body) == 0 {
-		dslFunc := "MethodAuto"
-		if hasContext {
-			dslFunc = "MethodAutoPassArgs"
-		}
-		return jen.Qual(dslPkg, dslFunc).Call(jen.Id(ifaceName).Dot(methodName))
+		return nil
 	}
 
 	dslFunc := "Method"

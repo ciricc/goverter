@@ -1,7 +1,8 @@
 // migrate converts goverter comment-based converter definitions to the type-safe DSL.
 //
 // For each package containing goverter:converter comments, it:
-//  1. Generates a goverter_dsl.go file with dsl.Conv[...] definitions
+//  1. Generates a goverter_dsl.go file with dsl.Conv[...] definitions (default)
+//     OR inserts the DSL inline into the source file after the converter interface (--inline)
 //  2. Removes goverter: comments from the original source files
 //
 // Usage:
@@ -13,11 +14,15 @@
 //	go run github.com/jmattheis/goverter/cmd/migrate ./...
 //	go run github.com/jmattheis/goverter/cmd/migrate ./pkg/converters
 //	go run github.com/jmattheis/goverter/cmd/migrate -dry-run ./...
+//	go run github.com/jmattheis/goverter/cmd/migrate -inline ./...
 package main
 
 import (
 	"flag"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,13 +31,15 @@ import (
 	"github.com/jmattheis/goverter/comments"
 	"github.com/jmattheis/goverter/config"
 	"github.com/jmattheis/goverter/dslmigrate"
+	"golang.org/x/tools/imports"
 )
 
 func main() {
 	dryRun := flag.Bool("dry-run", false, "print generated DSL without writing files")
 	buildTags := flag.String("tags", "goverter", "build tags to use when loading packages")
+	inline := flag.Bool("inline", false, "insert DSL into the source file after the converter interface instead of generating goverter_dsl.go")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: migrate [flags] [packages...]\n\nFlags:\n")
+		fmt.Fprintf(os.Stderr, "Usage: goverter-migrate [flags] [packages...]\n\nFlags:\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -103,44 +110,154 @@ func main() {
 		g.convs = append(g.convs, cc)
 	}
 
-
 	for _, pkgPath := range order {
 		g := groups[pkgPath]
 
-		// Generate DSL code
+		if *inline {
+			migrateInline(g.convs, workDir, *buildTags, *dryRun)
+		} else {
+			migrateFile(g.pkgName, g.fileName, g.convs, workDir, *buildTags, *dryRun)
+		}
+	}
+}
+
+// migrateFile writes a goverter_dsl.go file and strips comments from source files.
+func migrateFile(pkgName, firstFile string, convs []config.RawConverter, workDir, buildTags string, dryRun bool) {
+	var jenConvs []jen.Code
+	for _, cc := range convs {
+		info := dslmigrate.ExtractMethodInfo(cc, workDir, buildTags)
+		jenConvs = append(jenConvs, dslmigrate.ConvToJen(cc, info, workDir))
+	}
+	dslCode := dslmigrate.RenderDSLFile(pkgName, jenConvs)
+
+	dslFile := filepath.Join(filepath.Dir(firstFile), "goverter_dsl.go")
+
+	if dryRun {
+		fmt.Printf("=== %s ===\n%s\n", dslFile, dslCode)
+		return
+	}
+
+	if err := os.WriteFile(dslFile, []byte(dslCode), 0o644); err != nil {
+		fatalf("failed to write %s: %v", dslFile, err)
+	}
+	fmt.Printf("wrote %s\n", dslFile)
+
+	stripped, err := stripPackageComments(filepath.Dir(firstFile))
+	if err != nil {
+		fatalf("failed to strip comments: %v", err)
+	}
+	for path, content := range stripped {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			fatalf("failed to write %s: %v", path, err)
+		}
+		fmt.Printf("stripped %s\n", path)
+	}
+}
+
+// migrateInline inserts the DSL snippet directly into each source file, after
+// the converter interface declaration. Each converter is inserted into its own file.
+func migrateInline(convs []config.RawConverter, workDir, buildTags string, dryRun bool) {
+	// Group converters by source file
+	type fileEntry struct {
+		convs []config.RawConverter
+	}
+	byFile := map[string]*fileEntry{}
+	var fileOrder []string
+	for _, cc := range convs {
+		if _, ok := byFile[cc.FileName]; !ok {
+			byFile[cc.FileName] = &fileEntry{}
+			fileOrder = append(fileOrder, cc.FileName)
+		}
+		byFile[cc.FileName].convs = append(byFile[cc.FileName].convs, cc)
+	}
+
+	for _, filePath := range fileOrder {
+		entry := byFile[filePath]
+
+		src, err := os.ReadFile(filePath)
+		if err != nil {
+			fatalf("failed to read %s: %v", filePath, err)
+		}
+
+		// Build snippet for all converters in this file
 		var jenConvs []jen.Code
-		for _, cc := range g.convs {
-			info := dslmigrate.ExtractMethodInfo(cc, workDir, *buildTags)
+		for _, cc := range entry.convs {
+			info := dslmigrate.ExtractMethodInfo(cc, workDir, buildTags)
 			jenConvs = append(jenConvs, dslmigrate.ConvToJen(cc, info, workDir))
 		}
-		dslCode := dslmigrate.RenderDSLFile(g.pkgName, jenConvs)
+		snippet := dslmigrate.RenderDSLSnippet(jenConvs)
 
-		// DSL file goes in the same directory as the first converter file
-		dslFile := filepath.Join(filepath.Dir(g.fileName), "goverter_dsl.go")
+		// Find insertion point: end of the last converter interface in this file
+		insertOffset, err := findInsertOffset(filePath, src, entry.convs)
+		if err != nil {
+			fatalf("failed to find insertion point in %s: %v", filePath, err)
+		}
 
-		if *dryRun {
-			fmt.Printf("=== %s ===\n%s\n", dslFile, dslCode)
+		// Strip goverter: comments and insert snippet
+		stripped := stripGoverterComments(string(src))
+		result := stripped[:insertOffset] + "\n" + snippet + stripped[insertOffset:]
+
+		// Run goimports to fix up imports
+		formatted, err := imports.Process(filePath, []byte(result), nil)
+		if err != nil {
+			fatalf("goimports failed for %s: %v", filePath, err)
+		}
+
+		if dryRun {
+			fmt.Printf("=== %s ===\n%s\n", filePath, string(formatted))
 			continue
 		}
 
-		// Write DSL file
-		if err := os.WriteFile(dslFile, []byte(dslCode), 0o644); err != nil {
-			fatalf("failed to write %s: %v", dslFile, err)
+		if err := os.WriteFile(filePath, formatted, 0o644); err != nil {
+			fatalf("failed to write %s: %v", filePath, err)
 		}
-		fmt.Printf("wrote %s\n", dslFile)
+		fmt.Printf("inlined %s\n", filePath)
+	}
+}
 
-		// Strip goverter: comments from original source files in this package
-		stripped, err := stripPackageComments(filepath.Dir(g.fileName))
-		if err != nil {
-			fatalf("failed to strip comments: %v", err)
+// findInsertOffset returns the byte offset in src after the closing brace of
+// the last converter interface listed in convs.
+func findInsertOffset(filePath string, src []byte, convs []config.RawConverter) (int, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filePath, src, 0)
+	if err != nil {
+		return 0, fmt.Errorf("parse error: %w", err)
+	}
+
+	// Build set of interface names to find
+	names := map[string]bool{}
+	for _, cc := range convs {
+		names[cc.InterfaceName] = true
+	}
+
+	lastEnd := -1
+	for _, decl := range f.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.TYPE {
+			continue
 		}
-		for path, content := range stripped {
-			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-				fatalf("failed to write %s: %v", path, err)
+		for _, spec := range gd.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				continue
 			}
-			fmt.Printf("stripped %s\n", path)
+			if _, ok := ts.Type.(*ast.InterfaceType); !ok {
+				continue
+			}
+			if names[ts.Name.Name] {
+				end := fset.Position(gd.End()).Offset
+				if end > lastEnd {
+					lastEnd = end
+				}
+			}
 		}
 	}
+
+	if lastEnd == -1 {
+		// Fallback: append at end of file
+		return len(src), nil
+	}
+	return lastEnd, nil
 }
 
 // findConverterDirs walks roots and returns import-path-style patterns for

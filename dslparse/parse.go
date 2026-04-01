@@ -258,6 +258,9 @@ func parseOption(pkg *packages.Package, conv *config.RawConverter, expr ast.Expr
 	if name == "ExtendAllContext" {
 		return parseExtendAllContext(pkg, conv, call)
 	}
+	if name == "ExtendPkg" {
+		return parseExtendPkg(pkg, conv, call)
+	}
 
 	return nil
 }
@@ -325,6 +328,43 @@ func parseExtendWithContext(pkg *packages.Package, conv *config.RawConverter, ca
 		}
 		conv.Converter.Lines = append(conv.Converter.Lines, "extend "+strings.Join(funcNames, " "))
 	}
+	return nil
+}
+
+// parseExtendPkg handles ExtendPkg(symbol, pattern?) calls.
+// Resolves the package path from the first argument's type info, then emits
+// "extend pkg/path:pattern" (or "extend pkg/path:.*" if no pattern given).
+func parseExtendPkg(pkg *packages.Package, conv *config.RawConverter, call *ast.CallExpr) error {
+	if len(call.Args) == 0 {
+		return nil
+	}
+	obj := resolveFuncObj(pkg.TypesInfo, call.Args[0])
+	var pkgPath string
+	if obj != nil && obj.Pkg() != nil {
+		pkgPath = obj.Pkg().Path()
+	} else {
+		// Fallback: try to get package path from the type of the expression
+		if tv, ok := pkg.TypesInfo.Types[call.Args[0]]; ok && tv.Type != nil {
+			t := tv.Type
+			// Dereference pointer
+			if pt, ok := t.(*types.Pointer); ok {
+				t = pt.Elem()
+			}
+			if named, ok := t.(*types.Named); ok && named.Obj().Pkg() != nil {
+				pkgPath = named.Obj().Pkg().Path()
+			}
+		}
+	}
+	if pkgPath == "" {
+		return fmt.Errorf("ExtendPkg: could not resolve package from first argument")
+	}
+
+	pattern := ".*"
+	if len(call.Args) > 1 {
+		pattern = extractRegexpPattern(call.Args[1])
+	}
+
+	conv.Converter.Lines = append(conv.Converter.Lines, "extend "+pkgPath+":"+pattern)
 	return nil
 }
 

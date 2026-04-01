@@ -35,6 +35,14 @@ func Name(name string) Option            { return Option{} }
 func Extend(funcs ...any) Option         { return Option{} }
 func ExtendPassArgs(funcs ...any) Option { return Option{} }
 
+// ExtendPkg registers all exported functions from the package containing symbol
+// whose names match pattern (a Go regexp). If pattern is nil, all exported
+// functions are included.
+//
+//	dsl.ExtendPkg(pkg.AnyExportedSymbol)
+//	dsl.ExtendPkg(pkg.AnyExportedSymbol, regexp.MustCompile("Convert.*"))
+func ExtendPkg(symbol any, pattern ...*regexp.Regexp) Option { return Option{} }
+
 // ExtendAllContext registers extend functions where the source parameter is not
 // the first one. The contextParams strings explicitly name the context parameters
 // so goverter can identify which parameter is the source.
