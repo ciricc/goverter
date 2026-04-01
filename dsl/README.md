@@ -136,17 +136,36 @@ dsl.Conv[MyConverter](
 
 ## Migrating from comments
 
-Run the migration tool on your project:
+Install the migration tool and the patched goverter (uses a separate binary name to avoid overwriting your existing `goverter`):
+
+```bash
+git clone https://github.com/ciricc/goverter
+cd goverter
+
+# installs as "migrate" — does not conflict with your existing goverter binary
+go install ./cmd/migrate
+
+# installs patched goverter as "goverter-dsl" 
+GOBIN=$(go env GOPATH)/bin go build -o $(go env GOPATH)/bin/goverter-dsl ./cmd/goverter
+```
+
+Run migration:
 
 ```bash
 # Preview changes without writing files
-go run github.com/ciricc/goverter/cmd/migrate -dry-run ./...
+migrate -dry-run ./...
 
 # Apply migration
-go run github.com/ciricc/goverter/cmd/migrate ./...
+migrate ./...
 ```
 
-The tool:
+Then use `goverter-dsl` instead of `goverter` to generate converters:
+
+```bash
+goverter-dsl gen ./...
+```
+
+The migration tool:
 - Generates `goverter_dsl.go` next to each converter package
 - Removes `// goverter:` comments from original files
 - Warns about `goverter:variables` converters (not supported by DSL)
