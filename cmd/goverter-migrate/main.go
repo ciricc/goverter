@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -31,8 +32,8 @@ import (
 	"github.com/jmattheis/goverter/comments"
 	"github.com/jmattheis/goverter/config"
 	"github.com/jmattheis/goverter/dslmigrate"
-	"golang.org/x/tools/imports"
 )
+
 
 func main() {
 	dryRun := flag.Bool("dry-run", false, "print generated DSL without writing files")
@@ -187,32 +188,96 @@ func migrateInline(convs []config.RawConverter, workDir, buildTags string, dryRu
 		}
 		snippet := dslmigrate.RenderDSLSnippet(jenConvs)
 
-		// Find insertion point: end of the last converter interface in this file
-		insertOffset, err := findInsertOffset(filePath, src, entry.convs)
+		// Strip goverter: comments first, then find insertion point in the stripped source.
+		stripped := stripGoverterComments(string(src))
+
+		insertOffset, err := findInsertOffset(filePath, []byte(stripped), entry.convs)
 		if err != nil {
 			fatalf("failed to find insertion point in %s: %v", filePath, err)
 		}
 
-		// Strip goverter: comments and insert snippet
-		stripped := stripGoverterComments(string(src))
-		result := stripped[:insertOffset] + "\n" + snippet + stripped[insertOffset:]
+		withBody := stripped[:insertOffset] + "\n" + snippet.Body + stripped[insertOffset:]
 
-		// Run goimports to fix up imports
-		formatted, err := imports.Process(filePath, []byte(result), nil)
+		// Merge required imports into the file's import block via AST rewrite.
+		merged, err := mergeImports(filePath, []byte(withBody), snippet.Imports)
 		if err != nil {
-			fatalf("goimports failed for %s: %v", filePath, err)
+			fatalf("failed to merge imports in %s: %v", filePath, err)
 		}
 
 		if dryRun {
-			fmt.Printf("=== %s ===\n%s\n", filePath, string(formatted))
+			fmt.Printf("=== %s ===\n%s\n", filePath, string(merged))
 			continue
 		}
 
-		if err := os.WriteFile(filePath, formatted, 0o644); err != nil {
+		if err := os.WriteFile(filePath, merged, 0o644); err != nil {
 			fatalf("failed to write %s: %v", filePath, err)
 		}
 		fmt.Printf("inlined %s\n", filePath)
 	}
+}
+
+// mergeImports adds the given import specs into the file's import block (or
+// creates one) and returns the formatted result.
+func mergeImports(filePath string, src []byte, specs []dslmigrate.ImportSpec) ([]byte, error) {
+	if len(specs) == 0 {
+		return src, nil
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filePath, src, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("parse error: %w", err)
+	}
+
+	// Build set of already-imported paths to avoid duplicates.
+	existing := map[string]bool{}
+	for _, imp := range f.Imports {
+		path := strings.Trim(imp.Path.Value, `"`)
+		existing[path] = true
+	}
+
+	// Add missing imports via ast manipulation.
+	for _, spec := range specs {
+		if existing[spec.Path] {
+			continue
+		}
+		existing[spec.Path] = true
+
+		var nameIdent *ast.Ident
+		if spec.Alias != "" {
+			nameIdent = ast.NewIdent(spec.Alias)
+		}
+		impSpec := &ast.ImportSpec{
+			Name: nameIdent,
+			Path: &ast.BasicLit{Kind: token.STRING, Value: `"` + spec.Path + `"`},
+		}
+
+		// Find existing import decl or create one.
+		added := false
+		for _, decl := range f.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.IMPORT {
+				continue
+			}
+			gd.Specs = append(gd.Specs, impSpec)
+			added = true
+			break
+		}
+		if !added {
+			// Insert a new import decl after the package clause.
+			newDecl := &ast.GenDecl{
+				Tok:    token.IMPORT,
+				Lparen: 1, // force parenthesised form
+				Specs:  []ast.Spec{impSpec},
+			}
+			f.Decls = append([]ast.Decl{newDecl}, f.Decls...)
+		}
+	}
+
+	var buf strings.Builder
+	if err := format.Node(&buf, fset, f); err != nil {
+		return nil, fmt.Errorf("format error: %w", err)
+	}
+	return []byte(buf.String()), nil
 }
 
 // findInsertOffset returns the byte offset in src after the closing brace of

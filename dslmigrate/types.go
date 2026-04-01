@@ -478,10 +478,22 @@ func RenderDSLFile(pkgName string, convs []jen.Code) string {
 	return buf.String()
 }
 
-// RenderDSLSnippet renders converter definitions as raw Go statements without
-// a package declaration or imports. Used for inline insertion into existing files.
-func RenderDSLSnippet(convs []jen.Code) string {
-	// Use a throw-away file just to render statements, then strip the header.
+// ImportSpec holds a single import entry extracted from a jennifer-rendered file.
+type ImportSpec struct {
+	Alias string // empty means no alias (use default package name)
+	Path  string
+}
+
+// DSLSnippet holds the rendered var declarations and the imports they require.
+type DSLSnippet struct {
+	Imports []ImportSpec
+	Body    string // var _ = dsl.Conv[...](...) declarations
+}
+
+// RenderDSLSnippet renders converter definitions as var declarations and
+// extracts the required imports separately. The caller is responsible for
+// merging Imports into the target file's import block.
+func RenderDSLSnippet(convs []jen.Code) DSLSnippet {
 	f := jen.NewFile("_")
 	for i, conv := range convs {
 		if i > 0 {
@@ -491,15 +503,67 @@ func RenderDSLSnippet(convs []jen.Code) string {
 	}
 	buf := &strings.Builder{}
 	if err := f.Render(buf); err != nil {
-		return "// render error: " + err.Error()
+		return DSLSnippet{Body: "// render error: " + err.Error()}
 	}
-	// Strip everything up to and including the first blank line after "package _"
-	src := buf.String()
-	// Find the blank line that separates package decl / imports from body
-	if idx := strings.Index(src, "\n\n"); idx != -1 {
-		return strings.TrimLeft(src[idx:], "\n")
+
+	// jennifer renders: package _\nimport (...)\n\nvar _ = ...
+	// Parse imports and body separately.
+	var imports []ImportSpec
+	var body []string
+	inImport := false
+	for _, line := range strings.Split(buf.String(), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "package ") {
+			continue
+		}
+		if trimmed == "import (" {
+			inImport = true
+			continue
+		}
+		if inImport {
+			if trimmed == ")" {
+				inImport = false
+				continue
+			}
+			// Each line is either `"path"` or `alias "path"`
+			if spec, ok := parseImportLine(trimmed); ok {
+				imports = append(imports, spec)
+			}
+			continue
+		}
+		// Single-line import: import "pkg" or import alias "pkg"
+		if rest, ok2 := strings.CutPrefix(trimmed, "import "); ok2 {
+			if spec, ok := parseImportLine(rest); ok {
+				imports = append(imports, spec)
+			}
+			continue
+		}
+		body = append(body, line)
 	}
-	return src
+	return DSLSnippet{
+		Imports: imports,
+		Body:    strings.TrimLeft(strings.Join(body, "\n"), "\n"),
+	}
+}
+
+// parseImportLine parses a single import line like `"path"` or `alias "path"`.
+func parseImportLine(s string) (ImportSpec, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ImportSpec{}, false
+	}
+	if strings.HasPrefix(s, "\"") {
+		path := strings.Trim(s, "\"")
+		return ImportSpec{Path: path}, true
+	}
+	// alias "path"
+	parts := strings.SplitN(s, " ", 2)
+	if len(parts) == 2 {
+		alias := parts[0]
+		path := strings.Trim(parts[1], "\"")
+		return ImportSpec{Alias: alias, Path: path}, true
+	}
+	return ImportSpec{}, false
 }
 
 func (ctx *migrateCtx) converterLineToJenMulti(line string, passArgs bool) []jen.Code {
