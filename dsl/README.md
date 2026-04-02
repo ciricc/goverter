@@ -252,6 +252,7 @@ var _ = dsl.Conv[UserConverter](
 - [ ] golangci-lint plugin / `go vet` analyzer (`cmd/dslcheck`) for IDE inline diagnostics — wraps dslparse logic into `golang.org/x/tools/go/analysis` so errors like swapped source/target are highlighted in-editor via gopls
 - [ ] `MethodUpdate` — convention-based update method where the second parameter is always the target, eliminating the string argument in `m.Update("paramName")`
 - [ ] Resolve variable references in `Conv[T](...)` arguments — allow reusable `dsl.Option` variables and shared config packages instead of only inline `dsl.*()` calls
+- [ ] Introduce a typed `ConverterDef` intermediate model between DSL and `config.RawConverter` — dslparse builds `ConverterDef` instead of raw strings directly, then `ConverterDef.ToRaw()` serializes to `RawConverter`; centralizes string-building logic and makes the DSL layer easier to test
 
 ## Reference
 
